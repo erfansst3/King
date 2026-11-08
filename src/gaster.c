@@ -24,6 +24,7 @@
 #include <inttypes.h>
 #ifdef __ANDROID__
 #include <sys/socket.h>
+#include <sys/uio.h>
 #include <sys/wait.h>
 #include <unistd.h>
 #include <limits.h>
