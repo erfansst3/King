@@ -37,6 +37,21 @@ Requimpents:
 * `libusbK` driver (can be installed with [zadig](https://zadig.akeo.ie/))
 * `libusb` with fixed `MAX_PATH_LENGTH` ([see this PR](https://github.com/libusb/libusb/pull/699))
 
+## Android / Termux
+
+Android builds use Termux:API to request USB permission and pass the granted USB file descriptor to libusb. The helper requests a fresh descriptor after each USB re-enumeration.
+
+Install the Termux:API app from the same source as Termux, then run:
+
+```bash
+pkg install clang cmake make libusb termux-api -y
+cmake -S . -B build
+cmake --build build -j4
+./build/king checkm8
+```
+
+Connect the device in DFU mode and approve the USB permission dialog when Android asks. The program must be able to find `termux-usb` in PATH. USB permission may be requested again after a device reset.
+
 ## Compilation
 
 ```bash
