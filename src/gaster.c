@@ -293,7 +293,7 @@ wait_usb_handle(usb_handle_t *handle, usb_check_cb_t usb_check_cb, void *arg) {
 					libusb_close(handle->device);
 				} else {
 					close(fd);
-					fprintf(stderr, "[libusb] wrap_sys_device failed: %d\\n", r);
+					fprintf(stderr, "[libusb] wrap_sys_device failed: %d\n", r);
 				}
 			}
 #else
