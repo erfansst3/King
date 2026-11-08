@@ -27,6 +27,7 @@
 #include <sys/wait.h>
 #include <unistd.h>
 #include <limits.h>
+#include <errno.h>
 #endif
 
 #define DFU_DNLOAD (1)
@@ -228,6 +229,7 @@ int king_termux_usb_forward_fd(int sock, int fd) {
 
 static int termux_usb_open_device(uint16_t vid, uint16_t pid) {
 	int sv[2], fd, status;
+	pid_t waited;
 	pid_t child;
 	char exe[PATH_MAX], callback[PATH_MAX + 64], vids[8], pids[8];
 	ssize_t n = readlink("/proc/self/exe", exe, sizeof(exe) - 1);
@@ -251,13 +253,16 @@ static int termux_usb_open_device(uint16_t vid, uint16_t pid) {
 	close(sv[1]);
 	fd = termux_usb_recv_fd(sv[0]);
 	close(sv[0]);
-	while(waitpid(child, &status, 0) < 0) {}
+	do { waited = waitpid(child, &status, 0); } while(waited < 0 && errno == EINTR);
+	if(waited < 0) { if(fd >= 0) close(fd); return -1; }
 	if(fd < 0 || !WIFEXITED(status) || WEXITSTATUS(status) != 0) {
 		if(fd >= 0) close(fd);
 		return -1;
 	}
 	return fd;
 }
+#else
+int king_termux_usb_forward_fd(int sock, int fd) { return -1; }
 #endif
 
 static void
