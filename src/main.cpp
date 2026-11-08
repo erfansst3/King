@@ -25,6 +25,7 @@ using namespace tihmstar::img4tool;
 // abort-timing lands on hosts (e.g. pure-xHCI/AMD) that the ipwndfu-style
 // fixed-timing exploit cannot. Returns 0 on success.
 extern "C" int king_gaster_checkm8(void);
+extern "C" int king_termux_usb_forward_fd(int sock, int fd);
 
 #define AES256 1
 #include "aes.hpp"
@@ -1190,6 +1191,8 @@ ECOMMAND parseCommandLine(int argc, char *argv[])
 
 int main(int argc, char *argv[])
 {
+  if (argc == 4 && string(argv[1]) == "--usb-fd-bridge")
+    return king_termux_usb_forward_fd(atoi(argv[2]), atoi(argv[3]));
   ECOMMAND C = parseCommandLine(argc, argv);
   switch (C)
   {
