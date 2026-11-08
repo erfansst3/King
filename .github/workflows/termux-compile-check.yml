@@ -1,0 +1,14 @@
+name: Termux code-path compile
+on:
+  push:
+    branches: [android-termux]
+  pull_request:
+    branches: [android-termux]
+jobs:
+  compile:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: sudo apt-get update && sudo apt-get install -y cmake g++ gcc make libusb-1.0-0-dev
+      - run: cmake -S . -B build -DCMAKE_C_FLAGS=-D__ANDROID__ -DCMAKE_CXX_FLAGS=-D__ANDROID__
+      - run: cmake --build build -j2
