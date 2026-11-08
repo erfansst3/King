@@ -22,6 +22,12 @@
 #include <string.h>
 #include <time.h>
 #include <inttypes.h>
+#ifdef __ANDROID__
+#include <sys/socket.h>
+#include <sys/wait.h>
+#include <unistd.h>
+#include <limits.h>
+#endif
 
 #define DFU_DNLOAD (1)
 #define AES_CMD_DEC (1U)
@@ -185,6 +191,75 @@ sleep_ms(unsigned ms) {
 }
 
 #ifdef HAVE_LIBUSB
+#ifdef __ANDROID__
+static int termux_usb_recv_fd(int sock) {
+	char byte;
+	struct iovec iov = { .iov_base = &byte, .iov_len = 1 };
+	char control[CMSG_SPACE(sizeof(int))];
+	struct msghdr msg;
+	memset(&msg, 0, sizeof(msg));
+	msg.msg_iov = &iov;
+	msg.msg_iovlen = 1;
+	msg.msg_control = control;
+	msg.msg_controllen = sizeof(control);
+	if(recvmsg(sock, &msg, 0) != 1) return -1;
+	struct cmsghdr *cmsg = CMSG_FIRSTHDR(&msg);
+	if(!cmsg || cmsg->cmsg_level != SOL_SOCKET || cmsg->cmsg_type != SCM_RIGHTS) return -1;
+	return *((int *)CMSG_DATA(cmsg));
+}
+
+int king_termux_usb_forward_fd(int sock, int fd) {
+	char byte = 'F';
+	struct iovec iov = { .iov_base = &byte, .iov_len = 1 };
+	char control[CMSG_SPACE(sizeof(int))];
+	struct msghdr msg;
+	memset(&msg, 0, sizeof(msg));
+	msg.msg_iov = &iov;
+	msg.msg_iovlen = 1;
+	msg.msg_control = control;
+	msg.msg_controllen = sizeof(control);
+	struct cmsghdr *cmsg = CMSG_FIRSTHDR(&msg);
+	cmsg->cmsg_level = SOL_SOCKET;
+	cmsg->cmsg_type = SCM_RIGHTS;
+	cmsg->cmsg_len = CMSG_LEN(sizeof(int));
+	*((int *)CMSG_DATA(cmsg)) = fd;
+	return sendmsg(sock, &msg, 0) == 1 ? 0 : -1;
+}
+
+static int termux_usb_open_device(uint16_t vid, uint16_t pid) {
+	int sv[2], fd, status;
+	pid_t child;
+	char exe[PATH_MAX], callback[PATH_MAX + 64], vids[8], pids[8];
+	ssize_t n = readlink("/proc/self/exe", exe, sizeof(exe) - 1);
+	if(n <= 0) return -1;
+	exe[n] = '\0';
+	if(strchr(exe, ' ') || socketpair(AF_UNIX, SOCK_STREAM, 0, sv) != 0) return -1;
+	snprintf(callback, sizeof(callback), "%s --usb-fd-bridge %d", exe, sv[1]);
+	snprintf(vids, sizeof(vids), "%04x", vid);
+	snprintf(pids, sizeof(pids), "%04x", pid);
+	child = fork();
+	if(child < 0) {
+		close(sv[0]);
+		close(sv[1]);
+		return -1;
+	}
+	if(child == 0) {
+		close(sv[0]);
+		execlp("termux-usb", "termux-usb", "-r", "-e", callback, vids, pids, (char *)NULL);
+		_exit(127);
+	}
+	close(sv[1]);
+	fd = termux_usb_recv_fd(sv[0]);
+	close(sv[0]);
+	while(waitpid(child, &status, 0) < 0) {}
+	if(fd < 0 || !WIFEXITED(status) || WEXITSTATUS(status) != 0) {
+		if(fd >= 0) close(fd);
+		return -1;
+	}
+	return fd;
+}
+#endif
+
 static void
 close_usb_handle(usb_handle_t *handle) {
 	libusb_close(handle->device);
@@ -201,6 +276,22 @@ wait_usb_handle(usb_handle_t *handle, usb_check_cb_t usb_check_cb, void *arg) {
 	if(libusb_init(NULL) == LIBUSB_SUCCESS) {
 		printf("[libusb] Waiting for the USB handle with VID: 0x%" PRIX16 ", PID: 0x%" PRIX16 "\n", handle->vid, handle->pid);
 		for(;;) {
+#ifdef __ANDROID__
+			int fd = termux_usb_open_device(handle->vid, handle->pid);
+			if(fd >= 0) {
+				int r = libusb_wrap_sys_device(NULL, (intptr_t)fd, &handle->device);
+				if(r == LIBUSB_SUCCESS) {
+					if(usb_check_cb == NULL || usb_check_cb(handle, arg)) {
+						puts("Found the USB handle.");
+						return true;
+					}
+					libusb_close(handle->device);
+				} else {
+					close(fd);
+					fprintf(stderr, "[libusb] wrap_sys_device failed: %d\\n", r);
+				}
+			}
+#else
 			if((handle->device = libusb_open_device_with_vid_pid(NULL, handle->vid, handle->pid)) != NULL) {
 				/* Do NOT call libusb_set_configuration() here. The device is
 				 * already in configuration 1, and the Apple DFU USB stack does
@@ -214,6 +305,7 @@ wait_usb_handle(usb_handle_t *handle, usb_check_cb_t usb_check_cb, void *arg) {
 				}
 				libusb_close(handle->device);
 			}
+#endif
 			sleep_ms(usb_timeout);
 		}
 	}
